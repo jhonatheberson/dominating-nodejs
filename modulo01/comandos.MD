@@ -7,7 +7,7 @@
 `yarn` = instala todas as dependencias do projeto em que estou[diretorio] - dependencias que esta no arquivo package.json
 pasta node_modulos = onde fica todas as dependencias
 
-`const express`= require('express')\_ = esta importando a dependencia para o arquivo a qual estou declarando nesse caso é express
+`const express = require('express')` = esta importando a dependencia para o arquivo a qual estou declarando nesse caso é express
 
 `node [nome do arquivo]` = executa o arquivo usando node
 
@@ -37,7 +37,7 @@ _console.log("teste")_ url: http://localhost:3000/teste
 
 `return res.json({ 'messages': 'Hello World' })` = retorna[envia] para o cliente uma estrutura json
 
-- # exemplo de requisição body
+- # exemplo de requisição
 
 ```
 server.get('/teste', (req, res) => {
@@ -71,9 +71,24 @@ return res.json({ 'messages':`buscando o usuarios: ${id}` })
 })
 ```
 
+- # exemplo de requisição body
+
+```
+server.put('/users/:index', (req, res) => {
+  const { index } = req.params;
+
+  const { name } = req.body;
+
+  users[index] = name;
+
+  return res.json(users);
+});
+```
+
 `yarn add nodemon -D` = instala dependencia fica reiniciando node quando ouver mudanças no codigo **-D** significa quando for em produção essa dependencia não sera instalada
 
 vou no arquivo package.json e crio o script para ficar executando o nodemon que agora basta ir no terminal e executar **yarn dev** ou posso executar no terminal **nodemon index.js**
+
 ```
 "scripts": {
     "dev":"nodemon index.js"
@@ -83,12 +98,11 @@ vou no arquivo package.json e crio o script para ficar executando o nodemon que 
 `yarn remove [nome do pacote]`
 = desintala o pacote [remove do package.json]
 
-
 - # CRUD - Create, Read, Update, Delete
 
-```server.use(express.json())``` = instancia do express, no caso estou dizendo que o express vai receber json como padrão das requisições
-- **use** = adiciona um plugin ao express nesse caso, esse pluguin é **express.json()** que é uma função por isso *()*
+`server.use(express.json())` = instancia do express, no caso estou dizendo que o express vai receber json como padrão das requisições
 
+- **use** = adiciona um plugin ao express nesse caso, esse pluguin é **express.json()** que é uma função por isso _()_
 
 ```
 
@@ -140,5 +154,5 @@ server.delete('/users/:index', (req, res) => {
   return res.send();
 })
 
-server.listen(3000) // coloca server(express()) para escutar na porta 3000 
+server.listen(3000) // coloca server(express()) para escutar na porta 3000
 ```
