@@ -62,19 +62,55 @@ const users = ['jhonat', 'isabel', 'odaiza'];
 
 server.use(express.json()) // instancia do json, "use" = adiciona um plugin, no caso estou dizendo que o express vai receber json
 
+server.use((req, res, next) => { //exemplo do Middlewares global
+  console.time('Request');
+  console.log(`Metodo: ${req.method}; URL: ${req.url}`);
+
+  next();
+  console.timeEnd('Request');
+})
+
+function checkUserInArray(req, res, next) {
+  const user = users[req.params.index]
+
+  if (!user) {
+    return res.status(400).json({
+      error: "user does not exixts"
+    });
+  }
+
+  req.user = user;
+
+  return next();
+}
+
+function checkUserExists(req, res, next) {
+  if (!req.body.name) {
+    return res.status(400).json({
+      error: 'User not found on requet body'
+    });
+  }
+
+  return next();
+}
+
 server.get('/users', (req, res) => {
   return res.json(users);
 })
 
-server.get('/users/:index', (req, res) => {
+server.get('/users/:index', checkUserInArray, (req, res) => {
 
-  const { index } = req.params;
+  const {
+    index
+  } = req.params;
 
   return res.json(users[index]);
 });
 
-server.post('/users', (req, res) => {
-  const { name } = req.body;
+server.post('/users', checkUserExists, (req, res) => {
+  const {
+    name
+  } = req.body;
 
   users.push(name);
 
@@ -82,10 +118,14 @@ server.post('/users', (req, res) => {
 
 });
 
-server.put('/users/:index', (req, res) => {
-  const { index } = req.params;
+server.put('/users/:index', checkUserExists, checkUserInArray, (req, res) => {
+  const {
+    index
+  } = req.params;
 
-  const { name } = req.body;
+  const {
+    name
+  } = req.body;
 
   users[index] = name;
 
@@ -93,7 +133,9 @@ server.put('/users/:index', (req, res) => {
 });
 
 server.delete('/users/:index', (req, res) => {
-  const { index } = req.params;
+  const {
+    index
+  } = req.params;
 
   users.splice(index, 1); // metodo splice() percorre a lista e quando achar deleta apos essa posição
 

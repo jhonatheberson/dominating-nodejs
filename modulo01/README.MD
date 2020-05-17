@@ -156,3 +156,47 @@ server.delete('/users/:index', (req, res) => {
 
 server.listen(3000) // coloca server(express()) para escutar na porta 3000
 ```
+
+# Middlewares
+
+é qualquer função ou metodo que trate dos dados antes de ser retornados.
+
+- exemplo de Middleware global
+
+```
+server.use((req, res, next) => { //exemplo do Middlewares global
+  console.time('Request');
+  console.log(`Metodo: ${req.method}; URL: ${req.url}`);
+
+  next();
+  console.timeEnd('Request');
+})
+```
+
+- exemplo de Middleware local
+
+```
+function checkUserExists(req, res, next) {
+  if (!req.body.name) {
+    return res.status(400).json({
+      error: 'User not found on requet body'
+    });
+  }
+
+  return next();
+}
+
+
+server.post('/users', checkUserExists, (req, res) => {
+  const {
+    name
+  } = req.body;
+
+  users.push(name);
+
+  return res.json(users);
+
+});
+```
+
+# debugando no vscode
