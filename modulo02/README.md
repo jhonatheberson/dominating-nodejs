@@ -501,11 +501,11 @@ module.exports = {
         defaultValue: false, // setando valor padrão como "false"
         allowNull: false,
       },
-      create_at: {
+      created_at: {
         type: Sequelize.DATE,
         allowNull: false,
       },
-      update_at: {
+      updated_at: {
         type: Sequelize.DATE,
         allowNull: false,
       },
@@ -516,6 +516,7 @@ module.exports = {
     return queryInterface.dropTable('users');
   },
 };
+
 
 ```
 
@@ -543,4 +544,206 @@ yarn sequelize db:migrate:undo
 
 ```
 yarn sequelize db:migrate:undo:all
+```
+
+## criando models
+
+- models é para manipular os dados no banco
+
+para criar o model, é necessario criar um arquivo \*src/app/models/[nome do models].js
+
+por exemplo nesse caso abaixo criei o model _User.js_
+
+import Sequelize, { Model } from 'sequelize';
+
+```
+class User extends Model {
+  // aqui declaro os campos da migração
+  static init(sequelize) {
+    super.init(
+      {
+        name: Sequelize.STRING,
+        email: Sequelize.STRING,
+        password_hash: Sequelize.STRING,
+        provider: Sequelize.BOOLEAN,
+      },
+      {
+        sequelize,
+      }
+    );
+  }
+}
+
+export default User; // exportando o models user
+```
+
+mas para isso funcionar precisamos criar _src/database/index.js_
+
+esse arquivo informa os models que existe na minha aplicação
+
+```
+import Sequelize from 'sequelize';
+
+import User from '../app/models/User';
+
+import databaseConfig from '../config/database';
+
+const models = [User];
+
+class Database {
+  constructor() {
+    this.init();
+  }
+
+  init() {
+    this.connection = new Sequelize(databaseConfig);
+
+    models.map((model) => model.init(this.connection));
+  }
+}
+
+export default new Database();
+```
+
+também alterar o arquivo _src/routes.js_
+
+```
+import { Router } from 'express';
+import User from './app/models/User';
+
+const routes = new Router();
+
+routes.get('/', async (req, res) => {
+  const user = await User.create({
+    name: 'Diego Fernandes',
+    email: 'diego@rocketseat.com.br',
+    password_hash: '12345678',
+  });
+
+  return res.json(user);
+});
+
+module.exports = routes;
+
+```
+
+## Criando Controller
+
+- controller é metodo que irá manipular os dados e tratar, o que vai ser a funcionalidade.
+
+primeiramente precisa criar o arquivo do Controlller
+
+_src/app/controllers/[nome do controller].js_
+
+em meu exemplo ficou assim:
+
+_src/app/controllers/UserController.js_
+
+e conteudo desse arquivo esta dessa forma:
+
+```
+import User from '../models/User';
+
+class UserController {
+  async store(req, res) {
+    const userExists = await User.findOne({ where: { email: req.body.email } }); // verifica se ja existe esse email no banco
+
+    if (userExists) {
+      return res.status(400).json({ error: 'User already exists' });
+    }
+
+    // const user = await User.create(req.body); // "await" é para realizar as coisas assincronas
+    const { id, name, email, provider } = await User.create(req.body); // "await" é para realizar as coisas assincronas
+
+    // return res.json(user);
+    return res.json({
+      id,
+      name,
+      email,
+      provider,
+    });
+  }
+}
+
+export default new UserController();
+
+```
+
+além disso para usar esse controler é necessario modificar o arquivo _src/routes.js_
+
+ficando dessa forma:
+
+```
+import { Router } from 'express';
+// import User from './app/models/User';
+
+import UserController from './app/controllers/UserController';
+
+const routes = new Router();
+
+routes.post('/users', UserController.store);
+
+// routes.get('/', async (req, res) => {
+//   const user = await User.create({
+//     name: 'Diego Fernandes',
+//     email: 'diego@rocketseat.com.br',
+//     password_hash: '12345678',
+//   });
+
+//   return res.json(user);
+// });
+
+module.exports = routes;
+
+```
+
+## Gerando Hash de senha
+
+- iremos criptografar a senha do user ou qualquer coisa.
+
+para isso iremos usar o biblioteca **bcryptjs**
+
+```
+yarn add bcryptjs
+```
+
+para realizar as mudanças é necessario modificar o arquivo _src/app/models/User.js_
+
+importanto o bcryptjs e tratando a informação
+
+o arquivo _User.js_ ficou dessa forma.
+
+```
+import Sequelize, { Model } from 'sequelize';
+import bcrypt from 'bcryptjs';
+
+class User extends Model {
+  // aqui declaro os campos da migração
+  static init(sequelize) {
+    super.init(
+      {
+        name: Sequelize.STRING,
+        email: Sequelize.STRING,
+        password: Sequelize.VIRTUAL, // VIRTUAL significa que ele não existe na base de dados, somente no codigo
+        password_hash: Sequelize.STRING,
+        provider: Sequelize.BOOLEAN,
+      },
+      {
+        sequelize,
+      }
+    );
+    // é executado automaticamente
+    this.addHook('beforeSave', async (user) => {
+      // Hook: trecho de codigo que são acionados com as condições
+      if (user.password) {
+        user.password_hash = await bcrypt.hash(user.password, 8);
+      }
+      return this;
+    });
+  }
+}
+
+export default User; // exportando o models user
+
+
 ```

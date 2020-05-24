@@ -1,6 +1,8 @@
 import express from 'express'; // sucrase faz isso
 import routes from './routes';
 
+import './database';
+
 class App {
   constructor() {
     // esse metodo é contrutor é chamado
