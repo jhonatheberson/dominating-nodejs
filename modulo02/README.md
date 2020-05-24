@@ -467,6 +467,10 @@ yarn sequelize migration:create --name=create-users
 agora você pode ver que criou um arquivo
 na pasta _database/migrations/_
 
+- Data-types: https://sequelize.org/v5/manual/data-types.html
+
+- Validations: https://sequelize.org/v5/manual/models-definition.html#validations
+
 abaixo mostro um exemplo de arquivo de migrations:
 
 ```
@@ -540,5 +544,3 @@ yarn sequelize db:migrate:undo
 ```
 yarn sequelize db:migrate:undo:all
 ```
-
-
