@@ -359,12 +359,19 @@ insert_final_newline = true
   - server.js
   - app/
     - controllers/
+      - SessionController.js
+      - UserController.js
     - models/
+      - User.js
+    - middleware/
+      - auth.js
   - config/
     - database.js
+    - auth.js
   - database/
     - migrations/
     - seeds/
+    - index.js
 
 - .editorconfig
 - .eslintrc.js
@@ -844,5 +851,340 @@ routes.post('/sessions', SessionController.store);
 // });
 
 module.exports = routes;
+
+```
+
+## Middleware autenticação
+
+primeiramente iremos criar o **Middleware** em _src/middleware/auth.js_ com seguinte conteudo.
+
+```
+import jwt from 'jsonwebtoken';
+import { promisify } from 'util';
+
+import authConfig from '../../config/auth';
+
+export default async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader) {
+    return res.status(401).json({ error: 'Token not provided' });
+  }
+
+  // const token = authHeader.split('')
+  // const [bearer, token] = authHeader.split('') // destituração
+  const [, token] = authHeader.split(' '); // sera devido onde tem espaço, descart a primeira
+  // console.log(authHeader);
+  // console.log(token);
+  try {
+    // aqui posso usar 'jwt.verify' sem url callback com promisify
+    const decoded = await promisify(jwt.verify)(token, authConfig.secret);
+
+    // console.log(decoded);
+    req.userId = decoded.id;
+    return next();
+  } catch (err) {
+    return res.status(401).json({ error: 'token invalid' });
+  }
+};
+
+```
+
+agora iremos colocare sse **Middleware** global nesse caso no arquivo _src/routes.js_ dessa forma:
+
+```
+import { Router } from 'express';
+// import User from './app/models/User';
+
+import UserController from './app/controllers/UserController';
+import SessionController from './app/controllers/SessionController';
+
+import authMiddleware from './app/middleware/auth';
+
+const routes = new Router();
+
+routes.post('/users', UserController.store);
+routes.post('/sessions', SessionController.store);
+
+// esse middleware so é executado apos ele ser declarado.
+// logo as rotas posts acima não é executado esse middleware
+routes.use(authMiddleware); // middleware global de auth
+routes.put('/users', UserController.update);
+
+// routes.get('/', async (req, res) => {
+//   const user = await User.create({
+//     name: 'Diego Fernandes',
+//     email: 'diego@rocketseat.com.br',
+//     password_hash: '12345678',
+//   });
+
+//   return res.json(user);
+// });
+
+module.exports = routes;
+
+```
+
+pronto dessa forma poderemos usar tokan de autenticação.
+
+agora iremos usar esse token para realizar update.
+
+## Controller Update
+
+basicamente iremos usar o token que retornamos para cliente para ele infromar para api que já esta logado.
+
+para isso criamos metodo **update** em _src/app/UserController.js_
+
+este arquivo ficou dessa forma:
+
+```
+import User from '../models/User';
+
+class UserController {
+  async store(req, res) {
+    const userExists = await User.findOne({ where: { email: req.body.email } }); // verifica se ja existe esse email no banco
+
+    if (userExists) {
+      return res.status(400).json({ error: 'User already exists' });
+    }
+
+    // const user = await User.create(req.body); // "await" é para realizar as coisas assincronas
+    const { id, name, email, provider } = await User.create(req.body); // "await" é para realizar as coisas assincronas
+
+    // return res.json(user);
+    return res.json({
+      id,
+      name,
+      email,
+      provider,
+    });
+  }
+
+  async update(req, res) {
+    const { email, oldPassword } = req.body;
+
+    console.log(req.userId);
+
+    const user = await User.findByPk(req.userId);
+
+    // verifica se os email são diferentes
+    if (email !== user.email) {
+      const userExists = await User.findOne({
+        where: { email },
+      }); // verifica se ja existe esse email no banco
+
+      if (userExists) {
+        return res.status(400).json({ error: 'User already exists' });
+      }
+    }
+
+    if (oldPassword && !(await user.checkPassword(oldPassword))) {
+      // so altera a senha se informou a senha antigo e bate com a senha cadastrada
+      return res.status(401).json({ error: 'Password does not math' });
+    }
+
+    const { id, name, provider } = await user.update(req.body);
+
+    return res.json({
+      id,
+      name,
+      email,
+      provider,
+    });
+  }
+}
+
+export default new UserController();
+
+```
+
+## Validação dados de entrada
+
+- validação precisa ser feita tanto no FrontEnd, API
+- exemplo de valição: verifica se o **name** esta sendo enviado na requisição
+
+para validação uso pacote **yup**:
+
+```
+yarn add yup
+```
+
+para importa esse metodo é diferente pois precisa importar todo pacote
+
+```
+import * as Yup from 'yup'; // pacote de validação
+```
+
+Vale ressaltar que Esse pacote é **Scheme** verifica se esta vindo esse objeto igual na request:
+
+```
+const schema = Yup.object().shape({
+      name: Yup.string(),
+      email: Yup.string().email(),
+      oldPassword: Yup.string().min(6),
+      // validação condicional
+      password: Yup.string()
+        .min(6)
+        .when(
+          'oldPassword',
+          (oldPassword, field) => (oldPassword ? field.required() : field) // se minha variavel oldPassword não for vazia, field (password) sera obrigatorio, senão retorna o fildd (password) como estava antes
+        ),
+      confirmPassword: Yup.string().when(
+        'password',
+        (password, field) =>
+          password ? field.required().oneOf([Yup.ref('password')]) : field // se o compo password for obrigatorio e sejá igual a password senão retorn field
+      ),
+    });
+
+    if (!(await schema.isValid(req.body))) {
+      return res.status(400).json({ error: 'Validation fails' });
+    }
+```
+
+usei esse pacote para validar os dados do **controllers**
+
+ficando dessa forma _src/api/controllers/SessionController.js_ :
+
+```
+import jwt from 'jsonwebtoken';
+import * as Yup from 'yup'; // pacote de validação
+
+import User from '../models/User';
+import authConfig from '../../config/auth';
+
+// isso será usado para verificar se o user esta logado
+class SesssionController {
+  async store(req, res) {
+    const schema = Yup.object().shape({
+      email: Yup.string().email().required(),
+      password: Yup.string().required(), // compo senha é string, obrigatorio
+    });
+
+    if (!(await schema.isValid(req.body))) {
+      return res.status(400).json({ error: 'Validation fails' });
+    }
+    const { email, password } = req.body;
+
+    const user = await User.findOne({ where: { email } });
+
+    if (!user) {
+      return res.status(401).json({ error: 'User not found ' });
+    }
+
+    if (!(await user.checkPassword(password))) {
+      return res.status(401).json({ error: 'Password does not match' });
+    }
+    const { id, name } = user;
+
+    return res.json({
+      user: {
+        id,
+        name,
+        email,
+      },
+      // id, MD5 cript, prazo de expiração
+      token: jwt.sign({ id }, authConfig.secret, {
+        expiresIn: authConfig.expires,
+      }),
+    });
+  }
+}
+
+export default new SesssionController();
+
+```
+
+ficando dessa forma _src/api/controllers/UserController.js_ :
+
+```
+import * as Yup from 'yup'; // pacote de validação
+import User from '../models/User';
+
+class UserController {
+  async store(req, res) {
+    const schema = Yup.object().shape({
+      name: Yup.string().required(), // o compo name é string e obrigatorio
+      email: Yup.string().email().required(),
+      password: Yup.string().required().min(6), // compo senha é string, obrigatorio, com minimo de caractere igual a 6
+    });
+
+    if (!(await schema.isValid(req.body))) {
+      return res.status(401).json({ error: 'Validation fails' });
+    }
+
+    const userExists = await User.findOne({ where: { email: req.body.email } }); // verifica se ja existe esse email no banco
+
+    if (userExists) {
+      return res.status(400).json({ error: 'User already exists' });
+    }
+
+    // const user = await User.create(req.body); // "await" é para realizar as coisas assincronas
+    const { id, name, email, provider } = await User.create(req.body); // "await" é para realizar as coisas assincronas
+
+    // return res.json(user);
+    return res.json({
+      id,
+      name,
+      email,
+      provider,
+    });
+  }
+
+  async update(req, res) {
+    const schema = Yup.object().shape({
+      name: Yup.string(),
+      email: Yup.string().email(),
+      oldPassword: Yup.string().min(6),
+      // validação condicional
+      password: Yup.string()
+        .min(6)
+        .when(
+          'oldPassword',
+          (oldPassword, field) => (oldPassword ? field.required() : field) // se minha variavel oldPassword não for vazia, field (password) sera obrigatorio, senão retorna o fildd (password) como estava antes
+        ),
+      confirmPassword: Yup.string().when(
+        'password',
+        (password, field) =>
+          password ? field.required().oneOf([Yup.ref('password')]) : field // se o compo password for obrigatorio e sejá igual a password senão retorn field
+      ),
+    });
+
+    if (!(await schema.isValid(req.body))) {
+      return res.status(400).json({ error: 'Validation fails' });
+    }
+    const { email, oldPassword } = req.body;
+
+    console.log(req.userId);
+
+    const user = await User.findByPk(req.userId);
+
+    // verifica se os email são diferentes
+    if (email !== user.email) {
+      const userExists = await User.findOne({
+        where: { email },
+      }); // verifica se ja existe esse email no banco
+
+      if (userExists) {
+        return res.status(400).json({ error: 'User already exists' });
+      }
+    }
+
+    if (oldPassword && !(await user.checkPassword(oldPassword))) {
+      // so altera a senha se informou a senha antigo e bate com a senha cadastrada
+      return res.status(401).json({ error: 'Password does not math' });
+    }
+
+    const { id, name, provider } = await user.update(req.body);
+
+    return res.json({
+      id,
+      name,
+      email,
+      provider,
+    });
+  }
+}
+
+export default new UserController();
 
 ```
