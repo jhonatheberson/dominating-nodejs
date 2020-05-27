@@ -747,3 +747,102 @@ export default User; // exportando o models user
 
 
 ```
+
+## Autenticação JWT
+
+- JWT (Json Web Token)
+
+- principal autenticação de API REST
+
+- prova de edição
+
+primeiro precisamos criar um Controller pois se trata de outra entidade, a entidade Sessions
+
+criando o arquivo dessa forma _src/app/controllers/SessionController.js_
+
+o conteudo desse arquivo no meu exemplo fisou dessa forma:
+
+```
+import jwt from 'jsonwebtoken';
+
+import User from '../models/User';
+import authConfig from '../../config/auth';
+
+// isso será usado para verificar se o user esta logado
+class SesssionController {
+  async store(req, res) {
+    const { email, password } = req.body;
+
+    const user = await User.findOne({ where: { email } });
+
+    if (!user) {
+      return res.status(401).json({ error: 'User not found ' });
+    }
+
+    if (!(await user.checkPassword(password))) {
+      return res.status(401).json({ error: 'Password does not match' });
+    }
+    const { id, name } = user;
+
+    return res.json({
+      user: {
+        id,
+        name,
+        email,
+      },
+      // id, MD5 cript, prazo de expiração
+      token: jwt.sign({ id }, authConfig.secret, {
+        expiresIn: authConfig.expires,
+      }),
+    });
+  }
+}
+
+export default new SesssionController();
+
+```
+
+além disso, precisar adicionar o pacote **Jsonwebtoken** com o seguinte comando:
+
+```
+yarn add jsonwebtoken
+```
+
+Somado a isso irei criar o arquivo de configuração de autenticação em _src/config/auth.js_ com seguinte conteudo:
+
+```
+export default {
+  secret: 'b53a0c1f20483ab350486cf667768985',
+  expires: '7d',
+};
+
+```
+
+e claro para isso funcionar preciso criar uma nova rota para esse controller. Dessa forma o arquivo _src/routes.js_ foi alterado:
+
+```
+import { Router } from 'express';
+// import User from './app/models/User';
+
+import UserController from './app/controllers/UserController';
+import SessionController from './app/controllers/SessionController';
+
+const routes = new Router();
+
+routes.post('/users', UserController.store);
+
+routes.post('/sessions', SessionController.store);
+
+// routes.get('/', async (req, res) => {
+//   const user = await User.create({
+//     name: 'Diego Fernandes',
+//     email: 'diego@rocketseat.com.br',
+//     password_hash: '12345678',
+//   });
+
+//   return res.json(user);
+// });
+
+module.exports = routes;
+
+```
