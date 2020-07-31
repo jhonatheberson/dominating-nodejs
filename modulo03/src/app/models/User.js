@@ -26,6 +26,14 @@ class User extends Model {
     });
   }
 
+  static associate(models) {
+    // fazendo o realacionamento no tabela em todos os models
+    this.belongsTo(models.File, { foreignKey: 'avatar_id' });
+    // BelongsTo = pertence a File esta na tabela de User
+    // HasOne  = Users estaria na tabela de arquivo
+    // HasMany =  id do users em varios registro em tabelas
+  }
+
   checkPassword(password) {
     return bcrypt.compare(password, this.password_hash);
   }
