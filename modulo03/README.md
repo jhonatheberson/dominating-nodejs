@@ -335,3 +335,107 @@ class Database {
 export default new Database();
 
 ```
+
+agora vamos criar um rota para listar todos os providers
+
+para isso criei om novo controller porque se trata de uma nova intidade, apesar que ja temos para listar os usuarios
+
+```
+import { User } from '../models/User';
+import { File } from '../models/File';
+
+class ProviderController {
+  async index(res, req) {
+    const providers = await User.findAll({
+      where: { provider: true },
+      attributes: ['id', 'name', 'email', 'avatar_id'],
+      include: [
+        {
+          model: File,
+          as: 'avatar',
+          attributes: ['name', 'path'],
+        },
+      ],
+    });
+
+    return res(providers);
+  }
+}
+
+export default new ProviderController();
+
+```
+
+e adicionar essa rota no arquivo _routes.js_
+
+```
+import { Router } from 'express';
+import multer from 'multer'; // importando o multer
+import multerConfig from './config/multer'; // importando configuração do multer
+
+import UserController from './app/controllers/UserController';
+import SessionController from './app/controllers/SessionController';
+import FileController from './app/controllers/FileController';
+import ProviderController from './app/controllers/ProviderController';
+
+import authMiddleware from './app/middleware/auth';
+
+const routes = new Router();
+const upload = multer(multerConfig);
+
+routes.post('/users', UserController.store);
+routes.post('/sessions', SessionController.store);
+
+// esse middleware so é executado apos ele ser declarado.
+// logo as rotas posts acima não é executado esse middleware
+routes.use(authMiddleware); // middleware global de auth
+routes.put('/users', UserController.update);
+
+routes.get('/providers', ProviderController.index);
+
+routes.post('/files', upload.single('file'), FileController.store);
+
+module.exports = routes;
+
+```
+
+percebe se que no mdels, fiz alguam mehorias como _attributes_ e _includes_ na pesquisa com _where_
+
+agora pora poder abrir a imagem no browser precisamos altarer o _app.js_
+
+```
+import express from 'express'; // sucrase faz isso
+import routes from './routes';
+import path from './path';
+
+import './database';
+
+class App {
+  constructor() {
+    // esse metodo é contrutor é chamado
+    // automaticamente ao chamar a classe App
+    this.server = express();
+
+    this.middlewares();
+    this.routes();
+  }
+
+  middlewares() {
+    this.server.use(express.json());
+    this.server.use(
+      '/files',
+      express.static(path.resolve(__dirname, '..', 'tmp', 'uploads'))
+    );
+  }
+
+  routes() {
+    this.server.use(routes);
+  }
+}
+
+// module.exports = new App().server; //esportanto o class App, o server
+export default new App().server; // sucrase faz isso
+
+```
+
+incluiindo o midleware _files_

@@ -5,6 +5,7 @@ import multerConfig from './config/multer'; // importando configuração do mult
 import UserController from './app/controllers/UserController';
 import SessionController from './app/controllers/SessionController';
 import FileController from './app/controllers/FileController';
+import ProviderController from './app/controllers/ProviderController';
 
 import authMiddleware from './app/middleware/auth';
 
@@ -18,6 +19,8 @@ routes.post('/sessions', SessionController.store);
 // logo as rotas posts acima não é executado esse middleware
 routes.use(authMiddleware); // middleware global de auth
 routes.put('/users', UserController.update);
+
+routes.get('/providers', ProviderController.index);
 
 routes.post('/files', upload.single('file'), FileController.store);
 
