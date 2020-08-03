@@ -352,8 +352,8 @@ class ProviderController {
       include: [
         {
           model: File,
-          as: 'avatar',
-          attributes: ['name', 'path'],
+          as: 'avatar', //não consegue fazer funciona 'as'
+          attributes: ['name', 'path', 'url'],
         },
       ],
     });
@@ -401,7 +401,7 @@ module.exports = routes;
 
 percebe se que no mdels, fiz alguam mehorias como _attributes_ e _includes_ na pesquisa com _where_
 
-agora pora poder abrir a imagem no browser precisamos altarer o _app.js_
+agora para poder abrir a imagem no browser precisamos altarer o _app.js_
 
 ```
 import express from 'express'; // sucrase faz isso
@@ -438,4 +438,83 @@ export default new App().server; // sucrase faz isso
 
 ```
 
-incluiindo o midleware _files_
+incluiindo o midleware _files_ para poder que image possa abrir
+
+```
+import Sequelize, { Model } from 'sequelize';
+
+class File extends Model {
+  // aqui declaro os campos da migração
+  static init(sequelize) {
+    super.init(
+      {
+        name: Sequelize.STRING,
+        path: Sequelize.STRING,
+        url: {
+          type: Sequelize.VIRTUAL, // não exixte no banco de ados so no codigo
+          get() {
+            return `http://localhost:3333/files/${this.path}`; // para colocar variavel na string é outra aspas
+          },
+        },
+      },
+      {
+        sequelize,
+      }
+    );
+
+    return this;
+  }
+}
+
+export default File; // exportando o models user
+
+```
+
+para funcionar o as precisamos colocar tambem no models _Users.js_
+
+```
+import Sequelize, { Model } from 'sequelize';
+import bcrypt from 'bcryptjs';
+
+class User extends Model {
+  // aqui declaro os campos da migração
+  static init(sequelize) {
+    super.init(
+      {
+        name: Sequelize.STRING,
+        email: Sequelize.STRING,
+        password: Sequelize.VIRTUAL, // VIRTUAL significa que ele não existe na base de dados, somente no codigo
+        password_hash: Sequelize.STRING,
+        provider: Sequelize.BOOLEAN,
+      },
+      {
+        sequelize,
+      }
+    );
+    // é executado automaticamente
+    this.addHook('beforeSave', async (user) => {
+      // Hook: trecho de codigo que são acionados com as condições
+      if (user.password) {
+        user.password_hash = await bcrypt.hash(user.password, 8);
+      }
+      return this;
+    });
+  }
+
+  static associate(models) {
+    // fazendo o realacionamento no tabela em todos os models
+    this.belongsTo(models.File, {
+      foreignKey: 'avatar_id',
+    });
+    // HasOne  = Users estaria na tabela de arquivo
+    // HasMany =  id do users em varios registro em tabelas
+  }
+
+  checkPassword(password) {
+    return bcrypt.compare(password, this.password_hash);
+  }
+}
+
+export default User; // exportando o models user
+
+```
