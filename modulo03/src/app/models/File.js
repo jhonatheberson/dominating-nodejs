@@ -8,9 +8,9 @@ class File extends Model {
         name: Sequelize.STRING,
         path: Sequelize.STRING,
         url: {
-          type: Sequelize.VIRTUAL,
+          type: Sequelize.VIRTUAL, // não exixte no banco de ados so no codigo
           get() {
-            return 'http://localhost:3333/files/${this.path}';
+            return `http://localhost:3333/files/${this.path}`; // para colocar variavel na string é outra aspas
           },
         },
       },
