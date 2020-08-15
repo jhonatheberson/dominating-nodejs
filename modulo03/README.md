@@ -518,3 +518,102 @@ class User extends Model {
 export default User; // exportando o models user
 
 ```
+
+# tabela de agendamentos
+
+primeiramente irei criar o migrate chamado _appointments_
+rodando o seguinte comando
+
+```
+yarn sequelize migration:create --name=create-appointments
+```
+
+apos isso irei criar minha migração
+
+```
+module.exports = {
+  up: (queryInterface, Sequelize) => {
+    return queryInterface.createTable('appointments', {
+      id: {
+        type: Sequelize.INTEGER,
+        allowNull: false, // não permite nulo
+        autoIncrement: true, // autoincrementa o valor do interger
+        primaryKey: true, // é chave primaria
+      },
+      date: {
+        type: Sequelize.DATE,
+        allowNull: false,
+      },
+      user_id: {
+        type: Sequelize.INTEGER,
+        references: { model: 'users', key: 'id' }, // adiciona chave entrangeira no tabela users, referenciando o tabela "files", coluna "id"
+        onUpdate: 'CASCADE', // SE FOR ATUALIZADO, TODOS OS AGENDAMENTOS TAMBEM SÃO
+        onDelete: 'SET NULL', // SE O USER FOR DELETADO, O AGENDAMENTO AINDA FICA
+        allowNull: true,
+      },
+      provider_id: {
+        type: Sequelize.INTEGER,
+        references: { model: 'users', key: 'id' }, // adiciona chave entrangeira no tabela users, referenciando o tabela "files", coluna "id"
+        onUpdate: 'CASCADE',
+        onDelete: 'SET NULL',
+        allowNull: true,
+      },
+      canceled_at: {
+        type: Sequelize.DATE,
+      },
+      created_at: {
+        type: Sequelize.DATE,
+        allowNull: false,
+      },
+      updated_at: {
+        type: Sequelize.DATE,
+        allowNull: false,
+      },
+    });
+  },
+
+  down: (queryInterface) => {
+    return queryInterface.dropTable('appointments');
+  },
+};
+
+```
+
+e agora aplicamos nossa migração:
+
+```
+yarn sequelize db:migrate
+```
+
+vamo criar nosso models de _appointments_
+
+criando o arquivo _models/appointments.js_ com seguinte conteudo
+
+```
+import Sequelize, { Model } from 'sequelize';
+
+class Appointment extends Model {
+  // aqui declaro os campos da migração
+  static init(sequelize) {
+    super.init(
+      {
+        date: Sequelize.DATE,
+        canceled_at: Sequelize.DATE,
+      },
+      {
+        sequelize,
+      }
+    );
+
+    return this;
+  }
+
+  static associate(models) {
+    this.belongsTo(models.User, { foreignKey: 'user_id', as: 'user' });
+    this.belongsTo(models.User, { foreignKey: 'provider_id', as: 'provider' });
+  }
+}
+
+export default Appointment; // exportando o models user
+
+```
