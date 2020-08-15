@@ -587,7 +587,7 @@ yarn sequelize db:migrate
 
 vamo criar nosso models de _appointments_
 
-criando o arquivo _models/appointments.js_ com seguinte conteudo
+criando o arquivo _models/Appointments.js_ com seguinte conteudo
 
 ```
 import Sequelize, { Model } from 'sequelize';
@@ -609,11 +609,57 @@ class Appointment extends Model {
   }
 
   static associate(models) {
-    this.belongsTo(models.User, { foreignKey: 'user_id', as: 'user' });
-    this.belongsTo(models.User, { foreignKey: 'provider_id', as: 'provider' });
+    this.belongsTo(models.User, { foreignKey: 'user_id' });
+    this.belongsTo(models.User, { foreignKey: 'provider_id' });
   }
 }
 
 export default Appointment; // exportando o models user
 
+```
+
+agora iremos no _index.js_ e importar o models
+
+```
+import Sequelize from 'sequelize';
+
+import User from '../app/models/User';
+import File from '../app/models/File';
+import Appointment from '../app/models/Appointment';
+
+import databaseConfig from '../config/database';
+
+const models = [User, File, Appointment];
+
+class Database {
+  constructor() {
+    this.init();
+  }
+
+  init() {
+    this.connection = new Sequelize(databaseConfig);
+
+    models
+      .map((model) => model.init(this.connection))
+      .map(
+        (model) =>
+          Appointment.associate && Appointment.associate(this.connection.models) // iso faz que inclua o relacionamento no banco de a dodos
+      )
+      .map((model) => User.associate && User.associate(this.connection.models));
+    // so executa se a metodo existir "User.associate && User.associate"
+  }
+}
+
+export default new Database();
+
+```
+
+# date-fns
+
+- bibilio teca que trata datas e horas
+
+para instalar usaremos a ultima versão
+
+```
+yarn add date-fns@next
 ```
