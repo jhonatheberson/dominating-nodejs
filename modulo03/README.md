@@ -761,3 +761,215 @@ export default new AppointmentController();
 realizei dois cheks importantes _checkAvailability_ e _Check for past date_
 
 um para não deixar agendar dois serviços no mesmo horario e verificar se a hora de agendamento, é antes do horario atual
+
+# paginação
+
+para colocar a paginação, iremos enviar o parametro query, page = 1, ou qualquer pagina
+
+e iremos tratar isso no _AppointmentController.js_
+
+```
+import * as Yup from 'yup'; // library de validação
+import { startOfHour, parseISO, isBefore } from 'date-fns';
+import Appointment from '../models/Appointment';
+import User from '../models/User';
+import File from '../models/File';
+
+class AppointmentController {
+  async index(req, res) {
+    const { page = 1 } = req.query; // pegando a paginação
+    const appointments = await Appointment.findAll({
+      where: { user_id: req.userId, canceled_at: null },
+      order: ['date'], // ordenar a busca por data
+      attributes: ['id', 'date'],
+      limit: 20, // limitando quando iŕa mostrar por consulta
+      offset: (page - 1) * 20, // mostrando de onde voi começar a consulta
+      include: [
+        {
+          model: User,
+          attributes: ['id', 'name'], // mostrar somente id e nome do User
+          include: [
+            {
+              model: File,
+              attributes: ['id', 'path', 'url'],
+            },
+          ],
+        },
+      ],
+    });
+    return res.json(appointments);
+  }
+
+  async store(req, res) {
+    const scheme = Yup.object().shape({
+      provider_id: Yup.number().required(),
+      date: Yup.date().required(),
+    });
+
+    if (!(await scheme.isValid(req.body))) {
+      return res.status(400).json({ error: 'Validation fails' });
+    }
+
+    const { provider_id, date } = req.body;
+
+    /** Check if provider_id is a provider  */
+    const isProvider = await User.findOne({
+      where: { id: provider_id, provider: true },
+    });
+
+    if (!isProvider) {
+      return res
+        .status(401)
+        .json({ error: 'You can only create  appointments with providers' });
+    }
+    /**
+     * Check for past date
+     */
+    const hourStart = startOfHour(parseISO(date)); // se pega a hora, zera minutos e segundos
+
+    if (isBefore(hourStart, new Date())) {
+      return res.status(400).json({ error: 'Past dates are not permitions' });
+    }
+    /**
+     * check date availability
+     */
+    const checkAvailability = await Appointment.findOne({
+      where: {
+        provider_id,
+        canceled_at: null,
+        date: hourStart,
+      },
+    });
+
+    if (checkAvailability) {
+      return res
+        .status(400)
+        .json({ error: 'Appointment date is not available' });
+    }
+
+    const appointment = await Appointment.create({
+      user_id: req.userId,
+      provider_id: req.body.provider_id,
+      date: hourStart, // o minuto e segundo vai ser zero zero
+    });
+
+    return res.json(appointment);
+  }
+}
+
+export default new AppointmentController();
+
+```
+
+apenas peguei a o parametro page
+
+```
+const { page = 1 } = req.query; // pegando a paginação
+```
+
+e limitei as consultas colocando _limit_ e _offset_
+
+```
+where: { user_id: req.userId, canceled_at: null },
+      order: ['date'], // ordenar a busca por data
+      attributes: ['id', 'date'],
+      limit: 20, // limitando quando iŕa mostrar por consulta
+      offset: (page - 1) * 20, // mostrando de onde voi começar a consulta
+```
+
+# listagem agenda de prestadores
+
+para isso iremos crira outro controller devido se tratar de outro entidade, no caso para o baberiro en não para user comum **ScheduleController.js**
+
+com seguinte conteudo
+
+```
+import { startOfDay, endOfDay, parseISO } from 'date-fns';
+import { Op } from 'sequelize';
+import Appointment from '../models/Appointment';
+import User from '../models/User';
+
+class ScheduleController {
+  async index(req, res) {
+    const checkUserProvider = await User.findOne({
+      where: {
+        id: req.userId,
+        provider: true,
+      },
+    });
+
+    if (!checkUserProvider) {
+      return res.status(401).json({ error: 'User is not a provider' });
+    }
+
+    const { date } = req.query;
+    const parsedDate = parseISO(date);
+    // 2020-08-30T00:00:00-03:00
+    // 2020-08-30 00:00:00
+    // 2020-08-30 23:59:59
+    // iremos buscar todos os agendamentos entre essa datas, ou *between*
+    const appointments = await Appointment.findAll({
+      where: {
+        provider_id: req.userId,
+        canceled_at: null,
+        date: {
+          [Op.between]: [startOfDay(parsedDate), endOfDay(parsedDate)],
+        },
+      },
+      order: ['date'],
+    });
+
+    if (!appointments) {
+      return res.status(401).json({ error: 'Not apoointments for as date' });
+    }
+
+    return res.json(appointments);
+  }
+}
+
+export default new ScheduleController();
+
+
+```
+
+e adicionar essa rota ao **routes.js**
+
+```
+import { Router } from 'express';
+import multer from 'multer'; // importando o multer
+import multerConfig from './config/multer'; // importando configuração do multer
+
+import UserController from './app/controllers/UserController';
+import SessionController from './app/controllers/SessionController';
+import FileController from './app/controllers/FileController';
+import ProviderController from './app/controllers/ProviderController';
+import AppointmentController from './app/controllers/AppointmentController';
+import ScheduleController from './app/controllers/ScheduleController';
+
+import authMiddleware from './app/middleware/auth';
+
+const routes = new Router();
+const upload = multer(multerConfig);
+
+routes.post('/users', UserController.store);
+routes.post('/sessions', SessionController.store);
+
+// esse middleware so é executado apos ele ser declarado.
+// logo as rotas posts acima não é executado esse middleware
+routes.use(authMiddleware); // middleware global de auth
+routes.put('/users', UserController.update);
+
+routes.get('/providers', ProviderController.index);
+
+routes.post('/appointments', AppointmentController.store);
+routes.get('/appointments', AppointmentController.index);
+routes.get('/schedule', ScheduleController.index);
+
+routes.post('/files', upload.single('file'), FileController.store);
+
+module.exports = routes;
+
+
+```
+
+é importante mencionar que usei o _beetween_ no banco para buscar os dados entre os intervalos de datas, no caso, entre o inicio do dia e fim do dia

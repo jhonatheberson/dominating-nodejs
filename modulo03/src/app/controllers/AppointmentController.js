@@ -6,10 +6,13 @@ import File from '../models/File';
 
 class AppointmentController {
   async index(req, res) {
+    const { page = 1 } = req.query; // pegando a paginação
     const appointments = await Appointment.findAll({
       where: { user_id: req.userId, canceled_at: null },
       order: ['date'], // ordenar a busca por data
       attributes: ['id', 'date'],
+      limit: 20, // limitando quando iŕa mostrar por consulta
+      offset: (page - 1) * 20, // mostrando de onde voi começar
       include: [
         {
           model: User,
