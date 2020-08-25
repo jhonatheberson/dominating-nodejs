@@ -522,3 +522,12 @@ class AppointmentController {
 export default new AppointmentController();
 
 ```
+
+# Notificação por email
+
+- **nodemailer**
+- biblioteca para envio de email
+
+```
+yarn add nodemailer
+```
