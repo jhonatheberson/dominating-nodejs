@@ -1,5 +1,5 @@
 import * as Yup from 'yup'; // library de validação
-import { startOfHour, parseISO, isBefore, format } from 'date-fns';
+import { startOfHour, parseISO, isBefore, format, subHours } from 'date-fns';
 import pt from 'date-fns/locale/pt';
 import Appointment from '../models/Appointment';
 import User from '../models/User';
@@ -54,6 +54,13 @@ class AppointmentController {
       });
     }
     /**
+     * check user is provider
+     */
+
+    if (provider_id === req.userId) {
+      return res.status(401).json({ error: 'you not appointment for you' });
+    }
+    /**
      * Check for past date
      */
     const hourStart = startOfHour(parseISO(date)); // se pega a hora, zera minutos e segundos
@@ -97,6 +104,34 @@ class AppointmentController {
       content: `Novo agendamento de ${user.name} para ${formattedDate}`, // `Novo agendamento de jhonat heberson para dia 30 de abril às 19:00h`
       user: provider_id,
     });
+
+    return res.json(appointment);
+  }
+
+  async delete(req, res) {
+    const appointment = await Appointment.findByPk(req.params.id);
+
+    if (appointment.user_id !== req.userId) {
+      return res.status(401).json({
+        error: "You dont't have permission to concel this appointment.fail",
+      });
+    }
+
+    // 16.20
+    // datewithsub: 14:30h
+    // now 16.30
+
+    const dateWithSub = subHours(appointment.date, 2);
+
+    if (isBefore(dateWithSub, new Date())) {
+      return res.status(401).json({
+        error: 'You can only cancel appointment 2 hours in advance',
+      });
+    }
+
+    appointment.canceled_at = new Date();
+
+    await appointment.save();
 
     return res.json(appointment);
   }
