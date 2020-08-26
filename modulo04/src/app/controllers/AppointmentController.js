@@ -112,7 +112,8 @@ class AppointmentController {
 
   async delete(req, res) {
     const appointment = await Appointment.findByPk(req.params.id);
-    const provider = await User.findByPk(req.userId);
+    const user = await User.findByPk(req.userId);
+    const provider = await User.findByPk(appointment.provider_id);
 
     if (appointment.user_id !== req.userId) {
       return res.status(401).json({
@@ -135,11 +136,19 @@ class AppointmentController {
     appointment.canceled_at = new Date();
 
     await appointment.save();
-
+    console.log(provider.name);
+    console.log(user.name);
     await Mail.sendMail({
       to: `${provider.name} <${provider.email}>`,
       subject: 'Agendamento cancelado',
-      text: 'você tem um novo cancelamento',
+      template: 'cancellation',
+      context: {
+        provider: provider.name,
+        user: user.name,
+        date: format(appointment.date, "'dia' dd 'de' MMM', às' H:mm'h'", {
+          locale: pt,
+        }), // para dia 30 de agosto às 10:00h
+      },
     });
 
     return res.json(appointment);

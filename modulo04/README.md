@@ -529,9 +529,16 @@ export default new AppointmentController();
 - mailtrap - dev
 - aws ses - prod
 - biblioteca para envio de email
+- template engine | **Handlebars** https://handlebarsjs.com/guide/#nested-input-objects
 
 ```
 yarn add nodemailer
+```
+
+instalamos as integrações **express-handlebars** e **nodemailer-express-handlebars** com:
+
+```
+yarn add express-handlebars nodemailer-express-handlebars
 ```
 
 apos isso iremos criar um arquivo de configuração **/src/config/mail.js**
@@ -750,4 +757,297 @@ class AppointmentController {
 
 export default new AppointmentController();
 
+```
+
+# templates de email
+
+usaremos os seguintes pacotes:
+
+```
+yarn add express-handlebars nodemailer-express-handlebars
+```
+
+e agora iremos criar a estrutas e organização dos templates
+
+- **/src/views**
+  - emails
+    - layouts
+      - default.hbs
+    - partials
+      - footer.hbs
+    - cancellation.hbs
+
+o **default.hbs** é o template do email padrão, ou seja todo email vai ter aquelas configurações, o que muda é o _body_ e _partials_
+
+o **footer.hbs** é toda informação que é repetida no email, por exemplo assinatura, informações da empresa etc...
+
+o arquivo que esta dentro de pasta **emails** que nesse exemplo é **cancellation.hbs** é o corpo do email, a informaçao que iremos colocar com as variaveis
+
+agora iremos alterar o arquivo **Mail.js** para que ele possa usar o template:
+
+```
+import nodemailer from 'nodemailer';
+import { resolve } from 'path';
+import exphbs from 'express-handlebars';
+import nodemailerhbs from 'nodemailer-express-handlebars';
+import mailConfig from '../config/mail';
+
+class Mail {
+  constructor() {
+    const { host, port, secure, auth } = mailConfig;
+
+    this.transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure,
+      auth: auth.user ? auth : null, // verifica se se o email tem metodo de authenticate
+    });
+
+    this.configureTemplates();
+  }
+
+  configureTemplates() {
+    const viewPath = resolve(__dirname, '..', 'app', 'views', 'emails'); // pegando o diretorio emails
+
+    this.transporter.use(
+      'compile',
+      nodemailerhbs({
+        viewEngine: exphbs.create({
+          layoutsDir: resolve(viewPath, 'layouts'),
+          partialsDir: resolve(viewPath, 'partials'),
+          defaultLayout: 'default',
+          extname: '.hbs',
+        }),
+        viewPath,
+        extName: '.hbs',
+      })
+    );
+  }
+
+  sendMail(message) {
+    return this.transporter.sendMail({
+      ...mailConfig.default,
+      ...message,
+    });
+  }
+}
+
+export default new Mail();
+
+```
+
+o conteudo do arquivo **default.hbs** ficou o seguinte:
+
+```
+<div style="font-family: Arial, Helvetica, sans-serif; font-size: 16px; line-heigth: 1.6; color: #222; max-width: 600px">
+  {{{ body }}}
+  {{> footer }}
+</div>
+
+```
+
+o conteudo do arquivo **footer.hbs** ficou o seguinte:
+
+```
+<br />
+Equipe GoBarber
+
+```
+
+o conteudo do arquivo **cancellation.hbs** ficou o seguinte:
+
+```
+<strong>Olá, {{ provider }}</strong>
+<p>Houve um cancelamento de horário, confira os detalhes abaixo:</p>
+<p>
+  <strong> Cliente: </strong> {{ user }} <br />
+  <strong> Data/hora: </strong> {{ date }} <br />
+  <br />
+  <small>
+    O horário está disponível para novos agendamentos.
+  </small>
+</p>
+
+```
+
+agora vamos colocar para funcionar o template modificando o arquivo **AppointmentController.js**
+para executar a função e passar os parametros
+
+esse arquivo ficou assim:
+
+```
+import * as Yup from 'yup'; // library de validação
+import { startOfHour, parseISO, isBefore, format, subHours } from 'date-fns';
+import pt from 'date-fns/locale/pt';
+import Appointment from '../models/Appointment';
+import User from '../models/User';
+import File from '../models/File';
+import Notification from '../schemas/Notification';
+
+import Mail from '../../lib/Mail';
+
+class AppointmentController {
+  async index(req, res) {
+    const { page = 1 } = req.query; // pegando a paginação
+    const appointments = await Appointment.findAll({
+      where: { user_id: req.userId, canceled_at: null },
+      order: ['date'], // ordenar a busca por data
+      attributes: ['id', 'date'],
+      limit: 20, // limitando quando iŕa mostrar por consulta
+      offset: (page - 1) * 20, // mostrando de onde voi começar
+      include: [
+        {
+          model: User,
+          attributes: ['id', 'name'], // mostrar somente id e nome do User
+          include: [
+            {
+              model: File,
+              attributes: ['id', 'path', 'url'],
+            },
+          ],
+        },
+      ],
+    });
+    return res.json(appointments);
+  }
+
+  async store(req, res) {
+    const scheme = Yup.object().shape({
+      provider_id: Yup.number().required(),
+      date: Yup.date().required(),
+    });
+
+    if (!(await scheme.isValid(req.body))) {
+      return res.status(400).json({ error: 'Validation fails' });
+    }
+
+    const { provider_id, date } = req.body;
+
+    /** Check if provider_id is a provider  */
+    const isProvider = await User.findOne({
+      where: { id: provider_id, provider: true },
+    });
+
+    if (!isProvider) {
+      return res.status(401).json({
+        error: 'You can only create  appointments with providers',
+      });
+    }
+    /**
+     * check user is provider
+     */
+
+    if (provider_id === req.userId) {
+      return res.status(401).json({ error: 'you not appointment for you' });
+    }
+    /**
+     * Check for past date
+     */
+    const hourStart = startOfHour(parseISO(date)); // se pega a hora, zera minutos e segundos
+
+    if (isBefore(hourStart, new Date())) {
+      return res.status(400).json({ error: 'Past dates are not permitions' });
+    }
+    /**
+     * check date availability
+     */
+    const checkAvailability = await Appointment.findOne({
+      where: {
+        provider_id,
+        canceled_at: null,
+        date: hourStart,
+      },
+    });
+
+    if (checkAvailability) {
+      return res.status(400).json({
+        error: 'Appointment date is not available',
+      });
+    }
+
+    const appointment = await Appointment.create({
+      user_id: req.userId,
+      provider_id: req.body.provider_id,
+      date: hourStart, // o minuto e segundo vai ser zero zero
+    });
+
+    /**
+     * Notify appointment provider
+     */
+    const user = await User.findByPk(req.userId);
+
+    const formattedDate = format(hourStart, "'dia' dd 'de' MMM', às' H:mm'h'", {
+      locale: pt,
+    }); // para dia 30 de agosto às 10:00h
+
+    await Notification.create({
+      content: `Novo agendamento de ${user.name} para ${formattedDate}`, // `Novo agendamento de jhonat heberson para dia 30 de abril às 19:00h`
+      user: provider_id,
+    });
+
+    return res.json(appointment);
+  }
+
+  async delete(req, res) {
+    const appointment = await Appointment.findByPk(req.params.id);
+    const user = await User.findByPk(req.userId);
+    const provider = await User.findByPk(appointment.provider_id);
+
+    if (appointment.user_id !== req.userId) {
+      return res.status(401).json({
+        error: "You dont't have permission to concel this appointment.fail",
+      });
+    }
+
+    // 16.20
+    // datewithsub: 14:30h
+    // now 16.30
+
+    const dateWithSub = subHours(appointment.date, 2);
+
+    if (isBefore(dateWithSub, new Date())) {
+      return res.status(401).json({
+        error: 'You can only cancel appointment 2 hours in advance',
+      });
+    }
+
+    appointment.canceled_at = new Date();
+
+    await appointment.save();
+    await Mail.sendMail({
+      to: `${provider.name} <${provider.email}>`,
+      subject: 'Agendamento cancelado',
+      template: 'cancellation',
+      context: {
+        provider: provider.name,
+        user: user.name,
+        date: format(appointment.date, "'dia' dd 'de' MMM', às' H:mm'h'", {
+          locale: pt,
+        }), // para dia 30 de agosto às 10:00h
+      },
+    });
+
+    return res.json(appointment);
+  }
+}
+
+export default new AppointmentController();
+
+```
+
+apenas tiramos o _text_ e inlcuimos o template dessa forma:
+
+```
+await Mail.sendMail({
+      to: `${provider.name} <${provider.email}>`,
+      subject: 'Agendamento cancelado',
+      template: 'cancellation',
+      context: {
+        provider: provider.name,
+        user: user.name,
+        date: format(appointment.date, "'dia' dd 'de' MMM', às' H:mm'h'", {
+          locale: pt,
+        }), // para dia 30 de agosto às 10:00h
+      },
+    });
 ```
