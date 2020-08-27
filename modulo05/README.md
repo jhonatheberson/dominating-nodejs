@@ -1,239 +1,8 @@
-# modulo04
+# modulo05
 
-## Banco não relacional
+## Listando horarios disponíveis
 
-- usar o mongoDB
-- usando docker
-- mongoose
-- performace
-
-```
-docker run --name mongodb -p 27017:27017 -d -t mongo
-```
-
-para ver se esta rodando o mongo, precisamos acessar o porta no navegado com seguinte comando:
-
-```
-http://localhost:27017/
-```
-
-se retorna este texto é porque esta certo, **It looks like you are trying to access MongoDB over HTTP on the native driver port.**
-
-agora iremos iremos instalar cli para _mongodb_, mesma coisa do **sequelize**
-
-```
-yarn add mongoose
-```
-
-agora iremos fazer a configurações no _/src/database/index.js_
-
-iremos usar para armazenar dados e precisa de performace
-
-```
-import Sequelize from 'sequelize';
-import mongoose from 'mongoose';
-
-import User from '../app/models/User';
-import File from '../app/models/File';
-import Appointment from '../app/models/Appointment';
-
-import databaseConfig from '../config/database';
-
-const models = [User, File, Appointment];
-
-class Database {
-  constructor() {
-    this.init();
-    this.mongo();
-  }
-
-  init() {
-    this.connection = new Sequelize(databaseConfig);
-
-    models
-      .map((model) => model.init(this.connection))
-      .map(
-        (model) =>
-          Appointment.associate && Appointment.associate(this.connection.models) // iso faz que inclua o relacionamento no banco de a dodos
-      )
-      .map((model) => User.associate && User.associate(this.connection.models));
-    // so executa se a metodo existir "User.associate && User.associate"
-  }
-
-  mongo() {
-    this.mongoConnection = mongoose.connect(
-      'mongodb://localhost:27017/gobarber',
-      {
-        useUnifiedTopology: true,
-        useNewUrlParser: true,
-        useFindAndModify: true,
-      }
-    );
-  }
-}
-
-export default new Database();
-
-```
-
-usaremos o mongodb para fazer notificações
-
-# Notificando novos agendamentos
-
-precisamos ter cuidado com os schemas, precisamos ter estrategia
-
-criei uma pasta de _schemas_ no seguinte diretorio e o arquivo _Notification.js_
-
-**/src/app/schemas/Notification.js**
-
-e o conteudo de schema é o seguinte:
-
-```
-import mongoose from 'mongoose';
-
-const NotificationSchema = new mongoose.Schema(
-  {
-    content: {
-      type: String,
-      required: true,
-    },
-    user: {
-      type: Number,
-      required: true,
-    },
-    read: {
-      type: Boolean,
-      required: true,
-      default: false,
-    },
-  },
-  {
-    timestamps: true,
-  }
-);
-
-export default mongoose.model('Notification', NotificationSchema);
-```
-
-agora iremos usar, em nosso controller que queremos notificar
-
-em nosso caso o primeiro é _AppointmentController.js_
-
-a primeira coisa é importar o schema de notification
-
-```
-import * as Yup from 'yup'; // library de validação
-import { startOfHour, parseISO, isBefore, format } from 'date-fns';
-import pt from 'date-fns/locale/pt';
-import Appointment from '../models/Appointment';
-import User from '../models/User';
-import File from '../models/File';
-import Notification from '../schemas/Notification';
-
-class AppointmentController {
-  async index(req, res) {
-    const { page = 1 } = req.query; // pegando a paginação
-    const appointments = await Appointment.findAll({
-      where: { user_id: req.userId, canceled_at: null },
-      order: ['date'], // ordenar a busca por data
-      attributes: ['id', 'date'],
-      limit: 20, // limitando quando iŕa mostrar por consulta
-      offset: (page - 1) * 20, // mostrando de onde voi começar
-      include: [
-        {
-          model: User,
-          attributes: ['id', 'name'], // mostrar somente id e nome do User
-          include: [
-            {
-              model: File,
-              attributes: ['id', 'path', 'url'],
-            },
-          ],
-        },
-      ],
-    });
-    return res.json(appointments);
-  }
-
-  async store(req, res) {
-    const scheme = Yup.object().shape({
-      provider_id: Yup.number().required(),
-      date: Yup.date().required(),
-    });
-
-    if (!(await scheme.isValid(req.body))) {
-      return res.status(400).json({ error: 'Validation fails' });
-    }
-
-    const { provider_id, date } = req.body;
-
-    /** Check if provider_id is a provider  */
-    const isProvider = await User.findOne({
-      where: { id: provider_id, provider: true },
-    });
-
-    if (!isProvider) {
-      return res.status(401).json({
-        error: 'You can only create  appointments with providers',
-      });
-    }
-    /**
-     * Check for past date
-     */
-    const hourStart = startOfHour(parseISO(date)); // se pega a hora, zera minutos e segundos
-
-    if (isBefore(hourStart, new Date())) {
-      return res.status(400).json({ error: 'Past dates are not permitions' });
-    }
-    /**
-     * check date availability
-     */
-    const checkAvailability = await Appointment.findOne({
-      where: {
-        provider_id,
-        canceled_at: null,
-        date: hourStart,
-      },
-    });
-
-    if (checkAvailability) {
-      return res.status(400).json({
-        error: 'Appointment date is not available',
-      });
-    }
-
-    const appointment = await Appointment.create({
-      user_id: req.userId,
-      provider_id: req.body.provider_id,
-      date: hourStart, // o minuto e segundo vai ser zero zero
-    });
-
-    /**
-     * Notify appointment provider
-     */
-    const user = await User.findByPk(req.userId);
-
-    const formattedDate = format(hourStart, "'dia' dd 'de' MMM', às' H:mm'h'", {
-      locale: pt,
-    }); // para dia 30 de agosto às 10:00h
-
-    await Notification.create({
-      content: `Novo agendamento de ${user.name} para ${formattedDate}`, // `Novo agendamento de jhonat heberson para dia 30 de abril às 19:00h`
-      user: provider_id,
-    });
-
-    return res.json(appointment);
-  }
-}
-
-export default new AppointmentController();
-```
-
-usamos _format_ para formatar a data
-
-# listando notificações do usuário
-
-a primeira coisa que fizemos foi criar a rota em **routes.js**
+a primeira coisa é criar uma rota para isso:
 
 ```
 import { Router } from 'express';
@@ -247,6 +16,7 @@ import ProviderController from './app/controllers/ProviderController';
 import AppointmentController from './app/controllers/AppointmentController';
 import ScheduleController from './app/controllers/ScheduleController';
 import NotificationController from './app/controllers/NotificationController';
+import AvailableController from './app/controllers/AvailableController';
 
 import authMiddleware from './app/middleware/auth';
 
@@ -262,101 +32,7 @@ routes.use(authMiddleware); // middleware global de auth
 routes.put('/users', UserController.update);
 
 routes.get('/providers', ProviderController.index);
-
-routes.post('/appointments', AppointmentController.store);
-routes.get('/appointments', AppointmentController.index);
-routes.get('/schedule', ScheduleController.index);
-
-routes.get('/notifications', NotificationController.index);
-routes.put('/notifications/:id', NotificationController.update);
-
-routes.post('/files', upload.single('file'), FileController.store);
-
-module.exports = routes;
-
-```
-
-e criamos om controller para as notications **NotificationController.js**
-
-que tem os metodos de index que vai listar
-
-```
-import Notification from '../schemas/Notification';
-import User from '../models/User';
-
-class NotificationController {
-  async index(req, res) {
-    /** Check if provider_id is a provider  */
-    const isProvider = await User.findOne({
-      where: { id: req.userId, provider: true },
-    });
-
-    if (!isProvider) {
-      return res.status(401).json({
-        error: 'Only provider can load notifications',
-      });
-    }
-
-    const notification = await Notification.find({
-      user: req.userId,
-    })
-      .sort({ createdAt: 'desc' })
-      .limit(20);
-    return res.json(notification);
-  }
-
-  async update(req, res) {
-    // const notification = await Notification.findById(req.params.id);
-
-    const notification = await Notification.findByIdAndUpdate(
-      req.params.id,
-      { read: true }, // qual o campo que vamos atualizar
-      { new: true } // retorna a notificação atualizada
-    );
-
-    return res.json(notification);
-  }
-}
-
-export default new NotificationController();
-
-```
-
-também já coloquei o metodo de ler a noticação, no caso update
-
-# Cancelamento de agendamento
-
-para isso iremos mecher no controller appointment
-
-antes de tudo iremos criar a rota em **routes.js**
-
-```
-import { Router } from 'express';
-import multer from 'multer'; // importando o multer
-import multerConfig from './config/multer'; // importando configuração do multer
-
-import UserController from './app/controllers/UserController';
-import SessionController from './app/controllers/SessionController';
-import FileController from './app/controllers/FileController';
-import ProviderController from './app/controllers/ProviderController';
-import AppointmentController from './app/controllers/AppointmentController';
-import ScheduleController from './app/controllers/ScheduleController';
-import NotificationController from './app/controllers/NotificationController';
-
-import authMiddleware from './app/middleware/auth';
-
-const routes = new Router();
-const upload = multer(multerConfig);
-
-routes.post('/users', UserController.store);
-routes.post('/sessions', SessionController.store);
-
-// esse middleware so é executado apos ele ser declarado.
-// logo as rotas posts acima não é executado esse middleware
-routes.use(authMiddleware); // middleware global de auth
-routes.put('/users', UserController.update);
-
-routes.get('/providers', ProviderController.index);
+routes.get('/providers/:providerId/available', AvailableController.index);
 
 routes.post('/appointments', AppointmentController.store);
 routes.get('/appointments', AppointmentController.index);
@@ -371,803 +47,145 @@ routes.post('/files', upload.single('file'), FileController.store);
 
 module.exports = routes;
 
-```
-
-acrescetando o rota _delete_
-
-em seguida iremos em **AppointmentController.js**
-
-iremos adicionar o metodo delete
-
-```
-import * as Yup from 'yup'; // library de validação
-import { startOfHour, parseISO, isBefore, format, subHours } from 'date-fns';
-import pt from 'date-fns/locale/pt';
-import Appointment from '../models/Appointment';
-import User from '../models/User';
-import File from '../models/File';
-import Notification from '../schemas/Notification';
-
-class AppointmentController {
-  async index(req, res) {
-    const { page = 1 } = req.query; // pegando a paginação
-    const appointments = await Appointment.findAll({
-      where: { user_id: req.userId, canceled_at: null },
-      order: ['date'], // ordenar a busca por data
-      attributes: ['id', 'date'],
-      limit: 20, // limitando quando iŕa mostrar por consulta
-      offset: (page - 1) * 20, // mostrando de onde voi começar
-      include: [
-        {
-          model: User,
-          attributes: ['id', 'name'], // mostrar somente id e nome do User
-          include: [
-            {
-              model: File,
-              attributes: ['id', 'path', 'url'],
-            },
-          ],
-        },
-      ],
-    });
-    return res.json(appointments);
-  }
-
-  async store(req, res) {
-    const scheme = Yup.object().shape({
-      provider_id: Yup.number().required(),
-      date: Yup.date().required(),
-    });
-
-    if (!(await scheme.isValid(req.body))) {
-      return res.status(400).json({ error: 'Validation fails' });
-    }
-
-    const { provider_id, date } = req.body;
-
-    /** Check if provider_id is a provider  */
-    const isProvider = await User.findOne({
-      where: { id: provider_id, provider: true },
-    });
-
-    if (!isProvider) {
-      return res.status(401).json({
-        error: 'You can only create  appointments with providers',
-      });
-    }
-    /**
-     * check user is provider
-     */
-
-    if (provider_id === req.userId) {
-      return res.status(401).json({ error: 'you not appointment for you' });
-    }
-    /**
-     * Check for past date
-     */
-    const hourStart = startOfHour(parseISO(date)); // se pega a hora, zera minutos e segundos
-
-    if (isBefore(hourStart, new Date())) {
-      return res.status(400).json({ error: 'Past dates are not permitions' });
-    }
-    /**
-     * check date availability
-     */
-    const checkAvailability = await Appointment.findOne({
-      where: {
-        provider_id,
-        canceled_at: null,
-        date: hourStart,
-      },
-    });
-
-    if (checkAvailability) {
-      return res.status(400).json({
-        error: 'Appointment date is not available',
-      });
-    }
-
-    const appointment = await Appointment.create({
-      user_id: req.userId,
-      provider_id: req.body.provider_id,
-      date: hourStart, // o minuto e segundo vai ser zero zero
-    });
-
-    /**
-     * Notify appointment provider
-     */
-    const user = await User.findByPk(req.userId);
-
-    const formattedDate = format(hourStart, "'dia' dd 'de' MMM', às' H:mm'h'", {
-      locale: pt,
-    }); // para dia 30 de agosto às 10:00h
-
-    await Notification.create({
-      content: `Novo agendamento de ${user.name} para ${formattedDate}`, // `Novo agendamento de jhonat heberson para dia 30 de abril às 19:00h`
-      user: provider_id,
-    });
-
-    return res.json(appointment);
-  }
-
-  async delete(req, res) {
-    const appointment = await Appointment.findByPk(req.params.id);
-
-    if (appointment.user_id !== req.userId) {
-      return res.status(401).json({
-        error: "You dont't have permission to concel this appointment.fail",
-      });
-    }
-
-    // 16.20
-    // datewithsub: 14:30h
-    // now 16.30
-
-    const dateWithSub = subHours(appointment.date, 2);
-
-    if (isBefore(dateWithSub, new Date())) {
-      return res.status(401).json({
-        error: 'You can only cancel appointment 2 hours in advance',
-      });
-    }
-
-    appointment.canceled_at = new Date();
-
-    await appointment.save();
-
-    return res.json(appointment);
-  }
-}
-
-export default new AppointmentController();
 
 ```
 
-# Notificação por email
+**routes.get('/providers/:providerId/available', AvailableController.index);**
 
-- **nodemailer**
-- mailtrap - dev
-- aws ses - prod
-- biblioteca para envio de email
-- template engine | **Handlebars** https://handlebarsjs.com/guide/#nested-input-objects
+e
 
-```
-yarn add nodemailer
-```
+importa o Controller
 
-instalamos as integrações **express-handlebars** e **nodemailer-express-handlebars** com:
+**import AvailableController from './app/controllers/AvailableController';**
 
-```
-yarn add express-handlebars nodemailer-express-handlebars
-```
-
-apos isso iremos criar um arquivo de configuração **/src/config/mail.js**
+agora iremos criar o controller **AvailableController.js**
 
 com o seguinte conteudo:
 
 ```
-export default {
-  host: 'smtp.mailtrap.io',
-  port: '2525',
-  secure: false, // ssl segurança
-  auth: {
-    user: 'ea32dc7705b10b',
-    pass: '3f3ac8644a45a6',
-  },
-  default: {
-    from: 'Equipe GoBarber <noreply@gobarber.com', // copia default
-  },
-};
-
-// mailtrap = desenvolvimento
-// aws ses = produção
-
-
-```
-
-agora vamos fazer uma pasta onde iremos enviar o e-mail:
-
-vamos criar uma pasta **/src/lib**
-
-todas as configurações de serviços sera ficado nessa pasta
-
-a nesse exemplo criamos uma arquivo _Mail.js_
-
-esse arquivo tera o seguinte conteudo:
-
-```
-import nodemailer from 'nodemailer';
-import mailConfig from '../config/mail';
-
-class Mail {
-  constructor() {
-    const { host, port, secure, auth } = mailConfig;
-
-    this.transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure,
-      auth: auth.user ? auth : null, // verifica se se o email tem metodo de authenticate
-    });
-  }
-
-  sendMail(message) {
-    return this.transporter.sendMail({
-      ...mailConfig.default,
-      ...message,
-    });
-  }
-}
-
-export default new Mail();
-
-
-```
-
-e por fim iremos criar uma metodo para enviar no **AppointmentController.js**
-
-```
-import * as Yup from 'yup'; // library de validação
-import { startOfHour, parseISO, isBefore, format, subHours } from 'date-fns';
-import pt from 'date-fns/locale/pt';
+import {
+ startOfDay,
+ endOfDay,
+ setHours,
+ setMinutes,
+ setSeconds,
+ format,
+ isAfter,
+} from 'date-fns';
+import { Op } from 'sequelize';
 import Appointment from '../models/Appointment';
-import User from '../models/User';
-import File from '../models/File';
-import Notification from '../schemas/Notification';
 
-import Mail from '../../lib/Mail';
+class AvailableController {
+ async index(req, res) {
+   const { date } = req.query;
 
-class AppointmentController {
-  async index(req, res) {
-    const { page = 1 } = req.query; // pegando a paginação
-    const appointments = await Appointment.findAll({
-      where: { user_id: req.userId, canceled_at: null },
-      order: ['date'], // ordenar a busca por data
-      attributes: ['id', 'date'],
-      limit: 20, // limitando quando iŕa mostrar por consulta
-      offset: (page - 1) * 20, // mostrando de onde voi começar
-      include: [
-        {
-          model: User,
-          attributes: ['id', 'name'], // mostrar somente id e nome do User
-          include: [
-            {
-              model: File,
-              attributes: ['id', 'path', 'url'],
-            },
-          ],
-        },
-      ],
-    });
-    return res.json(appointments);
-  }
+   if (!date) {
+     return res.status(400).json({ error: 'Invalid date' });
+   }
 
-  async store(req, res) {
-    const scheme = Yup.object().shape({
-      provider_id: Yup.number().required(),
-      date: Yup.date().required(),
-    });
+   const searchDate = Number(date);
 
-    if (!(await scheme.isValid(req.body))) {
-      return res.status(400).json({ error: 'Validation fails' });
-    }
+   const appointments = await Appointment.findAll({
+     where: {
+       provider_id: req.params.providerId,
+       canceled_at: null,
+       date: {
+         [Op.between]: [startOfDay(searchDate), endOfDay(searchDate)],
+       },
+     },
+   });
 
-    const { provider_id, date } = req.body;
+   const schedule = [
+     '08:00', // 2020-06-23 08:00:00
+     '09:00', // 2020-06-23 09:00:00
+     '10:00',
+     '11:00',
+     '12:00',
+     '13:00',
+     '14:00',
+     '15:00',
+     '16:00',
+     '17:00',
+     '18:00',
+     '19:00',
+   ];
 
-    /** Check if provider_id is a provider  */
-    const isProvider = await User.findOne({
-      where: { id: provider_id, provider: true },
-    });
+   const available = schedule.map((time) => {
+     const [hour, minute] = time.split(':');
+     const value = setSeconds(
+       setMinutes(setHours(searchDate, hour), minute),
+       0
+     );
 
-    if (!isProvider) {
-      return res.status(401).json({
-        error: 'You can only create  appointments with providers',
-      });
-    }
-    /**
-     * check user is provider
-     */
-
-    if (provider_id === req.userId) {
-      return res.status(401).json({ error: 'you not appointment for you' });
-    }
-    /**
-     * Check for past date
-     */
-    const hourStart = startOfHour(parseISO(date)); // se pega a hora, zera minutos e segundos
-
-    if (isBefore(hourStart, new Date())) {
-      return res.status(400).json({ error: 'Past dates are not permitions' });
-    }
-    /**
-     * check date availability
-     */
-    const checkAvailability = await Appointment.findOne({
-      where: {
-        provider_id,
-        canceled_at: null,
-        date: hourStart,
-      },
-    });
-
-    if (checkAvailability) {
-      return res.status(400).json({
-        error: 'Appointment date is not available',
-      });
-    }
-
-    const appointment = await Appointment.create({
-      user_id: req.userId,
-      provider_id: req.body.provider_id,
-      date: hourStart, // o minuto e segundo vai ser zero zero
-    });
-
-    /**
-     * Notify appointment provider
-     */
-    const user = await User.findByPk(req.userId);
-
-    const formattedDate = format(hourStart, "'dia' dd 'de' MMM', às' H:mm'h'", {
-      locale: pt,
-    }); // para dia 30 de agosto às 10:00h
-
-    await Notification.create({
-      content: `Novo agendamento de ${user.name} para ${formattedDate}`, // `Novo agendamento de jhonat heberson para dia 30 de abril às 19:00h`
-      user: provider_id,
-    });
-
-    return res.json(appointment);
-  }
-
-  async delete(req, res) {
-    const appointment = await Appointment.findByPk(req.params.id);
-    const provider = await User.findByPk(req.userId);
-
-    if (appointment.user_id !== req.userId) {
-      return res.status(401).json({
-        error: "You dont't have permission to concel this appointment.fail",
-      });
-    }
-
-    // 16.20
-    // datewithsub: 14:30h
-    // now 16.30
-
-    const dateWithSub = subHours(appointment.date, 2);
-
-    if (isBefore(dateWithSub, new Date())) {
-      return res.status(401).json({
-        error: 'You can only cancel appointment 2 hours in advance',
-      });
-    }
-
-    appointment.canceled_at = new Date();
-
-    await appointment.save();
-
-    await Mail.sendMail({
-      to: `${provider.name} <${provider.email}>`,
-      subject: 'Agendamento cancelado',
-      text: 'você tem um novo cancelamento',
-    });
-
-    return res.json(appointment);
-  }
+     return {
+       time,
+       value: format(value, "yyyy-MM-dd'T'HH:mm:ssxxx"),
+       available:
+         isAfter(value, new Date()) &&
+         !appointments.find((a) => format(a.date, 'HH:mm') == time),
+     };
+   });
+   return res.json(available);
+ }
 }
 
-export default new AppointmentController();
+export default new AvailableController();
 
 ```
 
-# templates de email
+# campos virtuais de agendamentos
 
-usaremos os seguintes pacotes:
+a primeira cousa é ir no arquivo **models/Appointment.js**
 
-```
-yarn add express-handlebars nodemailer-express-handlebars
-```
+e vamos criar os compo virtual (campo que so existe no codigo)
 
-e agora iremos criar a estrutas e organização dos templates
+criei dois acmpos um para verificar se posso cancelar o agendamento e outro para verificar se a hora ja passou do agendamento.
 
-- **/src/views**
-  - emails
-    - layouts
-      - default.hbs
-    - partials
-      - footer.hbs
-    - cancellation.hbs
-
-o **default.hbs** é o template do email padrão, ou seja todo email vai ter aquelas configurações, o que muda é o _body_ e _partials_
-
-o **footer.hbs** é toda informação que é repetida no email, por exemplo assinatura, informações da empresa etc...
-
-o arquivo que esta dentro de pasta **emails** que nesse exemplo é **cancellation.hbs** é o corpo do email, a informaçao que iremos colocar com as variaveis
-
-agora iremos alterar o arquivo **Mail.js** para que ele possa usar o template:
+essa aquivo ficou assim:
 
 ```
-import nodemailer from 'nodemailer';
-import { resolve } from 'path';
-import exphbs from 'express-handlebars';
-import nodemailerhbs from 'nodemailer-express-handlebars';
-import mailConfig from '../config/mail';
+import Sequelize, { Model } from 'sequelize';
+import { isBefore, subHours } from 'date-fns';
 
-class Mail {
-  constructor() {
-    const { host, port, secure, auth } = mailConfig;
-
-    this.transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure,
-      auth: auth.user ? auth : null, // verifica se se o email tem metodo de authenticate
-    });
-
-    this.configureTemplates();
-  }
-
-  configureTemplates() {
-    const viewPath = resolve(__dirname, '..', 'app', 'views', 'emails'); // pegando o diretorio emails
-
-    this.transporter.use(
-      'compile',
-      nodemailerhbs({
-        viewEngine: exphbs.create({
-          layoutsDir: resolve(viewPath, 'layouts'),
-          partialsDir: resolve(viewPath, 'partials'),
-          defaultLayout: 'default',
-          extname: '.hbs',
-        }),
-        viewPath,
-        extName: '.hbs',
-      })
+class Appointment extends Model {
+  // aqui declaro os campos da migração
+  static init(sequelize) {
+    super.init(
+      {
+        date: Sequelize.DATE,
+        canceled_at: Sequelize.DATE,
+        past: {
+          type: Sequelize.VIRTUAL,
+          get() {
+            return isBefore(this.date, new Date()); // verifica se data do agendamento é depois da data atual, logo pode ser realizado o serviço
+          },
+        },
+        cancellable: {
+          type: Sequelize.VIRTUAL,
+          get() {
+            return isBefore(new Date(), subHours(this.date, 2)); // verifica se o agendamento tem 2h da hora atual
+          },
+        },
+      },
+      {
+        sequelize,
+      }
     );
+
+    return this;
   }
 
-  sendMail(message) {
-    return this.transporter.sendMail({
-      ...mailConfig.default,
-      ...message,
-    });
-  }
-}
-
-export default new Mail();
-
-```
-
-o conteudo do arquivo **default.hbs** ficou o seguinte:
-
-```
-<div style="font-family: Arial, Helvetica, sans-serif; font-size: 16px; line-heigth: 1.6; color: #222; max-width: 600px">
-  {{{ body }}}
-  {{> footer }}
-</div>
-
-```
-
-o conteudo do arquivo **footer.hbs** ficou o seguinte:
-
-```
-<br />
-Equipe GoBarber
-
-```
-
-o conteudo do arquivo **cancellation.hbs** ficou o seguinte:
-
-```
-<strong>Olá, {{ provider }}</strong>
-<p>Houve um cancelamento de horário, confira os detalhes abaixo:</p>
-<p>
-  <strong> Cliente: </strong> {{ user }} <br />
-  <strong> Data/hora: </strong> {{ date }} <br />
-  <br />
-  <small>
-    O horário está disponível para novos agendamentos.
-  </small>
-</p>
-
-```
-
-agora vamos colocar para funcionar o template modificando o arquivo **AppointmentController.js**
-para executar a função e passar os parametros
-
-esse arquivo ficou assim:
-
-```
-import * as Yup from 'yup'; // library de validação
-import { startOfHour, parseISO, isBefore, format, subHours } from 'date-fns';
-import pt from 'date-fns/locale/pt';
-import Appointment from '../models/Appointment';
-import User from '../models/User';
-import File from '../models/File';
-import Notification from '../schemas/Notification';
-
-import Mail from '../../lib/Mail';
-
-class AppointmentController {
-  async index(req, res) {
-    const { page = 1 } = req.query; // pegando a paginação
-    const appointments = await Appointment.findAll({
-      where: { user_id: req.userId, canceled_at: null },
-      order: ['date'], // ordenar a busca por data
-      attributes: ['id', 'date'],
-      limit: 20, // limitando quando iŕa mostrar por consulta
-      offset: (page - 1) * 20, // mostrando de onde voi começar
-      include: [
-        {
-          model: User,
-          attributes: ['id', 'name'], // mostrar somente id e nome do User
-          include: [
-            {
-              model: File,
-              attributes: ['id', 'path', 'url'],
-            },
-          ],
-        },
-      ],
-    });
-    return res.json(appointments);
-  }
-
-  async store(req, res) {
-    const scheme = Yup.object().shape({
-      provider_id: Yup.number().required(),
-      date: Yup.date().required(),
-    });
-
-    if (!(await scheme.isValid(req.body))) {
-      return res.status(400).json({ error: 'Validation fails' });
-    }
-
-    const { provider_id, date } = req.body;
-
-    /** Check if provider_id is a provider  */
-    const isProvider = await User.findOne({
-      where: { id: provider_id, provider: true },
-    });
-
-    if (!isProvider) {
-      return res.status(401).json({
-        error: 'You can only create  appointments with providers',
-      });
-    }
-    /**
-     * check user is provider
-     */
-
-    if (provider_id === req.userId) {
-      return res.status(401).json({ error: 'you not appointment for you' });
-    }
-    /**
-     * Check for past date
-     */
-    const hourStart = startOfHour(parseISO(date)); // se pega a hora, zera minutos e segundos
-
-    if (isBefore(hourStart, new Date())) {
-      return res.status(400).json({ error: 'Past dates are not permitions' });
-    }
-    /**
-     * check date availability
-     */
-    const checkAvailability = await Appointment.findOne({
-      where: {
-        provider_id,
-        canceled_at: null,
-        date: hourStart,
-      },
-    });
-
-    if (checkAvailability) {
-      return res.status(400).json({
-        error: 'Appointment date is not available',
-      });
-    }
-
-    const appointment = await Appointment.create({
-      user_id: req.userId,
-      provider_id: req.body.provider_id,
-      date: hourStart, // o minuto e segundo vai ser zero zero
-    });
-
-    /**
-     * Notify appointment provider
-     */
-    const user = await User.findByPk(req.userId);
-
-    const formattedDate = format(hourStart, "'dia' dd 'de' MMM', às' H:mm'h'", {
-      locale: pt,
-    }); // para dia 30 de agosto às 10:00h
-
-    await Notification.create({
-      content: `Novo agendamento de ${user.name} para ${formattedDate}`, // `Novo agendamento de jhonat heberson para dia 30 de abril às 19:00h`
-      user: provider_id,
-    });
-
-    return res.json(appointment);
-  }
-
-  async delete(req, res) {
-    const appointment = await Appointment.findByPk(req.params.id);
-    const user = await User.findByPk(req.userId);
-    const provider = await User.findByPk(appointment.provider_id);
-
-    if (appointment.user_id !== req.userId) {
-      return res.status(401).json({
-        error: "You dont't have permission to concel this appointment.fail",
-      });
-    }
-
-    // 16.20
-    // datewithsub: 14:30h
-    // now 16.30
-
-    const dateWithSub = subHours(appointment.date, 2);
-
-    if (isBefore(dateWithSub, new Date())) {
-      return res.status(401).json({
-        error: 'You can only cancel appointment 2 hours in advance',
-      });
-    }
-
-    appointment.canceled_at = new Date();
-
-    await appointment.save();
-    await Mail.sendMail({
-      to: `${provider.name} <${provider.email}>`,
-      subject: 'Agendamento cancelado',
-      template: 'cancellation',
-      context: {
-        provider: provider.name,
-        user: user.name,
-        date: format(appointment.date, "'dia' dd 'de' MMM', às' H:mm'h'", {
-          locale: pt,
-        }), // para dia 30 de agosto às 10:00h
-      },
-    });
-
-    return res.json(appointment);
+  static associate(models) {
+    this.belongsTo(models.User, { foreignKey: 'user_id' });
+    this.belongsTo(models.User, { foreignKey: 'provider_id' });
   }
 }
 
-export default new AppointmentController();
+export default Appointment; // exportando o models user
 
 ```
 
-apenas tiramos o _text_ e inlcuimos o template dessa forma:
-
-```
-await Mail.sendMail({
-      to: `${provider.name} <${provider.email}>`,
-      subject: 'Agendamento cancelado',
-      template: 'cancellation',
-      context: {
-        provider: provider.name,
-        user: user.name,
-        date: format(appointment.date, "'dia' dd 'de' MMM', às' H:mm'h'", {
-          locale: pt,
-        }), // para dia 30 de agosto às 10:00h
-      },
-    });
-```
-
-# Configurando fila com Redis
-
-- background jobs
-- redis - banco não relacional (chaves e valores)
-- bee-queue - https://github.com/bee-queue/bee-queue - **não controla prioridades**
-- Kue - https://github.com/Automattic/kue - **controla tudo, tem mais recursos**
-
-```
-docker run --name redisbarber -p 6379:6379 -d -t redis:alpine
-```
-
-se deu problema
-
-```
-docker logs [nome image]
-```
-
-agora vamos instalar uma fila para nossas tarefas, tem duas, a mais simples e rapida o **bee-queue**, e outra mais robusta com mais funcionalidades, a exemplo prioridades porém mais lento a execução **Kue**
-
-como o nossa caso é para envio de email, o **bee-queue** satisfas muito bem a nosso problema
-
-para instalar executamos o comnado no terminal:
-
-```
-yarn add bee-queue
-```
-
-e agora iremos criar o arquivo de configuração na pasta **/src/lib/Queue.js**
-
-o conteudo dessa arquivo é :
-
-```
-
-```
-
-além disso vamos criar uma pasta _jobs_, porque qualquer coisa que execute no fila é chamada de _jobs_ e para cada tarefa teremos um _jobs_
-
-nesse exemplo:
-
-- src
-  - app
-    - jobs
-      - CancellationMail.js
-      - SendEmail.js
-      - etc...
-
-em nossa exemplo criamos o arquivo **/src/jobs/CancellationMail.js**
-
-com seguinte conteudo:
-
-```
-import { format, parseISO } from 'date-fns';
-import pt from 'date-fns/locale/pt';
-import Mail from '../../lib/Mail';
-
-class CancellaationMail {
-  get key() {
-    // colocando o get na frente
-    return 'CancellationMail';
-  }
-
-  async handle({ data }) {
-    const { provider, user, appointment } = data;
-    // a função handle que vai executar o job que queremos executar
-
-    console.log('A fila executou!');
-
-    Mail.sendMail({
-      to: `${provider.name} <${provider.email}>`,
-      subject: 'Agendamento cancelado',
-      template: 'cancellation',
-      context: {
-        provider: provider.name,
-        user: user.name,
-        date: format(
-          parseISO(appointment.date),
-          "'dia' dd 'de' MMM', às' H:mm'h'",
-          {
-            locale: pt,
-          }
-        ), // para dia 30 de agosto às 10:00h
-      },
-    });
-  }
-}
-export default new CancellaationMail();
-
-// import CancellationMail from '..'fail
-// CancellationMail.key
-
-```
-
-também para fazer a conexão com redis vamos criar uma arquivo de configuração **/src/config/redis.js**
-
-o conteudo do arquivo ficou assim:
-
-```
-export default {
-  host: '127.0.0.1',
-  port: 6379,
-};
-
-```
-
-agora iremos criar uma arquivo _queue.js_ em **/src/queue.js**
-
-com seguinte conteudo:
-
-```
-import Queue from './lib/Queue';
-
-Queue.processQueue(); // isso faz que o afila não afeta a plicação
-
-```
-
-para executar isso remos alterar o arquivo **AppointmentController.js** para passar a infromação para fila e executa-la:
+e para mostar o valores virtuais temos que incluir no controller **AppointmentController.js**
 
 ```
 import * as Yup from 'yup'; // library de validação
@@ -1187,7 +205,7 @@ class AppointmentController {
     const appointments = await Appointment.findAll({
       where: { user_id: req.userId, canceled_at: null },
       order: ['date'], // ordenar a busca por data
-      attributes: ['id', 'date'],
+      attributes: ['id', 'date', 'past', 'cancellable'],
       limit: 20, // limitando quando iŕa mostrar por consulta
       offset: (page - 1) * 20, // mostrando de onde voi começar
       include: [
@@ -1322,56 +340,104 @@ class AppointmentController {
 
 export default new AppointmentController();
 
-```
-
-# monitorando falhas na fila
 
 ```
-import Bee from 'bee-queue';
-import CancellationMail from '../app/jobs/CancellationMail';
-import redisConfig from '../config/redis';
 
-const jobs = [CancellationMail]; // aqui fica notos os jobs, que quero fazer asincrono (fila)
+incluindo **past** e **cancellable**
 
-class Queue {
+# tratamento de exceções
+
+iremos usar um biblioteca de tratamento e monitoramento de aplicação
+
+- bugsnag - https://www.bugsnag.com/
+- sentry - https://sentry.io/onboarding/jhonat/get-started/
+- express-async-errors
+- youch
+
+iremos usar o **sentry** para instalar:
+
+```
+yarn add @sentry/node
+```
+
+porém para o sentry funcionar corretamente precisamos instalar uma biblioteca que possa pegar os erros dentro do **async** do node que por padrão ele não pega:
+
+vamos instalar :
+
+```
+yarn add express-async-errors
+```
+
+e vamos instalar o biblioteca **youch**
+ele faz uma trataiva de erro, com visualização melhor para o dev
+
+```
+yarn add youch
+```
+
+para usar isso primeiro iremos criar uma arquivo de configuração do **sentry** em **/src/config/sentry**
+colocando o **dsn** do sentry:
+
+```
+export default {
+  dsn:
+    'https://d0cde146d7694634be08863c3c6d1948@o440114.ingest.sentry.io/5408130',
+};
+
+```
+
+e agora iremos criar uma metodo para retornar os problemas e sentry monito a api:
+
+iremos fazer isso no primeiro arquivo que o **node.js** executa, em nosso caso é **/src/app.js** com o seguinte conteudo:
+
+```
+import express from 'express'; // sucrase faz isso
+import path from 'path';
+import Youch from 'youch';
+import * as Sentry from '@sentry/node';
+import 'express-async-errors';
+
+import routes from './routes';
+import sentryConfig from './config/sentry';
+
+import './database';
+
+class App {
   constructor() {
-    this.queues = {};
+    // esse metodo é contrutor é chamado
+    // automaticamente ao chamar a classe App
+    this.server = express();
 
-    this.init();
+    Sentry.init(sentryConfig);
+
+    this.middlewares();
+    this.routes();
   }
 
-  init() {
-    jobs.forEach(({ key, handle }) => {
-      this.queues[key] = {
-        bee: new Bee(key, {
-          redis: redisConfig, // armazena a fila
-        }),
-        handle, // armazena os jobs
-      };
+  middlewares() {
+    this.server.use(Sentry.Handlers.requestHandler()); // antes de tudo
+    this.server.use(express.json());
+    this.server.use(
+      '/files',
+      express.static(path.resolve(__dirname, '..', 'tmp', 'uploads')) // meodo static consegue abrir imagens
+    );
+  }
+
+  routes() {
+    this.server.use(routes);
+    this.server.use(Sentry.Handlers.errorHandler());
+  }
+
+  exceptionHandler() {
+    this.server.use(async (err, req, res, next) => {
+      const errors = await new Youch(err, req).toJSON();
+
+      return res.status(500).json(errors);
     });
-  }
-
-  add(queue, job) {
-    // adiciona os jobs a fila
-    return this.queues[queue].bee.createJob(job).save();
-  }
-
-  processQueue() {
-    // processa a fila, executa os jobs que tem na fila
-    jobs.forEach((job) => {
-      const { bee, handle } = this.queues[job.key];
-
-      bee.on('failed', this.handleFailure).process(handle);
-    });
-  }
-
-  handleFailure(job, err) {
-    console.log(`Queue ${job.queue.name}: FAILED`, err);
   }
 }
 
-export default new Queue();
+// module.exports = new App().server; //esportanto o class App, o server
+export default new App().server; // sucrase faz isso
 
 ```
-
-apenas crianção a função qeu mostra o erro **handleFailure**
