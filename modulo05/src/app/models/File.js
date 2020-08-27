@@ -10,7 +10,7 @@ class File extends Model {
         url: {
           type: Sequelize.VIRTUAL, // não exixte no banco de ados so no codigo
           get() {
-            return `http://localhost:3333/files/${this.path}`; // para colocar variavel na string é outra aspas
+            return `${process.env.APP_URL}/files/${this.path}`; // para colocar variavel na string é outra aspas
           },
         },
       },

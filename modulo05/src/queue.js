@@ -1,3 +1,5 @@
+import 'dotenv/config';
+
 import Queue from './lib/Queue';
 
 Queue.processQueue(); // isso faz que o afila não afeta a plicação

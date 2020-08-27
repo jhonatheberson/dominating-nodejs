@@ -441,3 +441,254 @@ class App {
 export default new App().server; // sucrase faz isso
 
 ```
+
+# variáveis ambiente
+
+- dotenv
+
+A primeira coisa é criar um arquivo **./.env** e colocar todas as variaveis de enbientes nela no seguinte formato e o arquivo também ficou assim:
+
+```
+APP_URL=htpp://localhost:3333
+NODE_ENV=development
+
+# Auth
+
+APP_SECRET=bootcampgobarbernode
+
+# Database
+
+DB_HOST=localhost
+DB_USER=postgres
+DB_PASS=1298
+DB_NAME=gobarber
+
+# Mongo
+
+MONG_URL=mongodb://localhost:27017/gobarber
+
+# Redis
+
+REDIS_HOST=127.0.0.1
+REDIS_POST=6379
+
+# Mail
+
+MAIL_HOST=smtp.mailtrap.io
+MAIL_PORT=2525
+MAIL_USER=ea32dc7705b10b
+MAIL_PASS=3f3ac8644a45a6
+
+# Sentry
+
+SENTRY_DSN=https://d0cde146d7694634be08863c3c6d1948@o440114.ingest.sentry.io/5408130 # SO FAZ SENTIDO EM PROD
+
+```
+
+e vamos instalar um pacote **dotenv**
+
+```
+yarn add dotenv
+```
+
+agora vamos importar o **dotenv** nos arquivo que precisamos, na primeira importação (_ondem é importante_) **app.js** o **queue.js** e **/src/config/database.js**
+
+os arquivos ficou da seguinte forma respectivamente:
+
+```
+import 'dotenv/config';
+
+import express from 'express'; // sucrase faz isso
+import path from 'path';
+import Youch from 'youch';
+import * as Sentry from '@sentry/node';
+import 'express-async-errors';
+
+import routes from './routes';
+import sentryConfig from './config/sentry';
+
+import './database';
+
+class App {
+  constructor() {
+    // esse metodo é contrutor é chamado
+    // automaticamente ao chamar a classe App
+    this.server = express();
+
+    Sentry.init(sentryConfig);
+
+    this.middlewares();
+    this.routes();
+  }
+
+  middlewares() {
+    this.server.use(Sentry.Handlers.requestHandler()); // antes de tudo
+    this.server.use(express.json());
+    this.server.use(
+      '/files',
+      express.static(path.resolve(__dirname, '..', 'tmp', 'uploads')) // meodo static consegue abrir imagens
+    );
+  }
+
+  routes() {
+    this.server.use(routes);
+    this.server.use(Sentry.Handlers.errorHandler());
+  }
+
+  exceptionHandler() {
+    this.server.use(async (err, req, res, next) => {
+      const errors = await new Youch(err, req).toJSON();
+
+      return res.status(500).json(errors);
+    });
+  }
+}
+
+// module.exports = new App().server; //esportanto o class App, o server
+export default new App().server; // sucrase faz isso
+
+```
+
+```
+import 'dotenv/config';
+
+import Queue from './lib/Queue';
+
+Queue.processQueue(); // isso faz que o afila não afeta a plicação
+// porque estara executando em node.js diferentes no pc
+
+```
+
+```
+require('dotenv/config');
+
+module.exports = {
+  dialect: 'postgres',
+  host: 'localhost',
+  username: 'postgres',
+  password: '1298',
+  database: 'gobarber',
+  define: {
+    timestamps: true,
+    underscored: true,
+    underscoredALL: true,
+  },
+};
+
+```
+
+e agora iremos trocar as variaveis de anbientes nos arquivos que usamos:
+
+exemplo:
+
+```
+get() {
+    return `http://localhost:3333/files/${this.path}`;
+      },
+```
+
+para :
+
+```
+get() {
+    return `${process.env.APP_URL}/files/${this.path}`;
+      },
+```
+
+o primeiro que mudamos foi no arquivo **/src/app/models/File.js** :
+
+```
+import Sequelize, { Model } from 'sequelize';
+
+class File extends Model {
+  // aqui declaro os campos da migração
+  static init(sequelize) {
+    super.init(
+      {
+        name: Sequelize.STRING,
+        path: Sequelize.STRING,
+        url: {
+          type: Sequelize.VIRTUAL, // não exixte no banco de ados so no codigo
+          get() {
+            return `${process.env.APP_URL}/files/${this.path}`; // para colocar variavel na string é outra aspas
+          },
+        },
+      },
+      {
+        sequelize,
+      }
+    );
+
+    return this;
+  }
+}
+
+export default File; // exportando o models user
+
+```
+
+o segundo foi no arquivo **/src/app.js** para que possamos
+verificar se esta em anbiente de desenvolvimento e não mostrar os erros internos do servidor:
+
+```
+import 'dotenv/config';
+
+import express from 'express'; // sucrase faz isso
+import path from 'path';
+import Youch from 'youch';
+import * as Sentry from '@sentry/node';
+import 'express-async-errors';
+
+import routes from './routes';
+import sentryConfig from './config/sentry';
+
+import './database';
+
+class App {
+  constructor() {
+    // esse metodo é contrutor é chamado
+    // automaticamente ao chamar a classe App
+    this.server = express();
+
+    Sentry.init(sentryConfig);
+
+    this.middlewares();
+    this.routes();
+  }
+
+  middlewares() {
+    this.server.use(Sentry.Handlers.requestHandler()); // antes de tudo
+    this.server.use(express.json());
+    this.server.use(
+      '/files',
+      express.static(path.resolve(__dirname, '..', 'tmp', 'uploads')) // meodo static consegue abrir imagens
+    );
+  }
+
+  routes() {
+    this.server.use(routes);
+    this.server.use(Sentry.Handlers.errorHandler());
+  }
+
+  exceptionHandler() {
+    this.server.use(async (err, req, res, next) => {
+      if (process.env.NODE_ENV === 'development') {
+        const errors = await new Youch(err, req).toJSON();
+
+        return res.status(500).json(errors);
+      }
+      return res.status(500).json({ error: 'Internal server error' });
+    });
+  }
+}
+
+// module.exports = new App().server; //esportanto o class App, o server
+export default new App().server; // sucrase faz isso
+
+```
+
+apenas alteramos a perte final do arquivo **exceptionHandler()**
+
+e alteramos todos as outras variaveis.
+
+também criamos um arquivo **.env.example** que é copia do **.env** sem os dados sensíveis
